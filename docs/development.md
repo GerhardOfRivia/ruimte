@@ -58,7 +58,7 @@ Unique constraints cover `(catalog_id,image_id)` and `(catalog_id,checksum)`. In
 
 ## Local development
 
-Install Go 1.25+, Node 22.12+ with npm, GDAL 3.6+ (`gdalinfo`, `gdaltransform`, and fixture tools `gdal_create`/`gdal_translate`; Debian/Ubuntu package `gdal-bin`), and PostgreSQL with PostGIS. Docker-only builds require none of these on the host.
+Install Go 1.25+, Node 22.12+ with npm, GDAL 3.6+ (`gdalinfo`, `gdaltransform`, `ogr2ogr`, `ogrinfo`, and fixture tools `gdal_create`/`gdal_translate`; Debian/Ubuntu package `gdal-bin`), and PostgreSQL with PostGIS. Docker-only builds require none of these on the host.
 
 ```sh
 # Optional dedicated local PostGIS for development:
@@ -105,3 +105,12 @@ The source specification is [`internal/api/openapi.json`](../internal/api/openap
 The application's `/docs/` route serves the bundled Swagger UI. Markdown guides
 in this repository's `docs/` directory are separate and are not served by that route.
 Update the [documentation index](README.md) when adding a guide.
+
+GeoPackage export uses `internal/footprintexport` and GDAL's explicit
+[VRT field schema](https://gdal.org/en/stable/drivers/vector/vrt.html) to keep
+all-null cloud values numeric. The existing `gdal-bin` Docker package includes
+`ogr2ogr` and `ogrinfo`; no extra service or online resource is required.
+Integration tests inspect generated layers with `ogrinfo`. Disposable export
+files use the system temporary directory; allow space for two concurrent exports
+and SQLite journals. SQLite page allocation is bounded using
+[OGR_SQLITE_PRAGMA](https://gdal.org/en/stable/drivers/vector/gpkg.html).

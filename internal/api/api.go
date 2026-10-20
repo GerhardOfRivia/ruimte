@@ -96,6 +96,7 @@ func routes(service *catalog.Service, version string, access Access, basemap str
 	read(http.MethodGet, "/imagery", h.list)
 	// The POST body carries search geometry; this endpoint never mutates the catalog.
 	read(http.MethodPost, "/imagery/search", h.search)
+	r.Post("/imagery/export/gpkg", func(w http.ResponseWriter, r *http.Request) { h.searchRequest(w, r, true) })
 	read(http.MethodGet, "/imagery/{catalogID}/{imageID}", h.get)
 	opts := raster.DefaultViewerOptions()
 	if len(options) > 0 {
@@ -214,8 +215,10 @@ func (h Handler) list(w http.ResponseWriter, r *http.Request) {
 	}
 	h.execute(w, r, q)
 }
-func (h Handler) search(w http.ResponseWriter, r *http.Request) {
-	var body struct {
+func (h Handler) search(w http.ResponseWriter, r *http.Request) { h.searchRequest(w, r, false) }
+
+func (h Handler) searchRequest(w http.ResponseWriter, r *http.Request, export bool) {
+	var body *struct {
 		CatalogID         string          `json:"catalog_id"`
 		ImageIDs          []string        `json:"image_ids"`
 		AcquiredFrom      *string         `json:"acquired_from"`
@@ -225,12 +228,15 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 		Geometry          json.RawMessage `json:"geometry"`
 		CloudCoverLT      *float64        `json:"cloud_cover_lt"`
 		Limit             *int            `json:"limit"`
-		Offset            int             `json:"offset"`
+		Offset            *int            `json:"offset"`
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	err := dec.Decode(&body)
+	if err == nil && body == nil {
+		err = errors.New("expected a JSON object")
+	}
 	if err == nil {
 		var extra any
 		if next := dec.Decode(&extra); next != io.EOF {
@@ -255,14 +261,25 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	g, err := geo.Parse(body.Geometry)
-	if err != nil {
-		Error(w, 400, "invalid_geometry", err.Error())
-		return
+	var geometry *geo.Geometry
+	if !export || len(body.Geometry) > 0 {
+		g, err := geo.Parse(body.Geometry)
+		if err != nil {
+			Error(w, 400, "invalid_geometry", err.Error())
+			return
+		}
+		geometry = &g
 	}
-	q := catalog.Query{CatalogID: body.CatalogID, ImageIDs: body.ImageIDs, Geometry: &g, CloudCoverLT: body.CloudCoverLT, CloudCoverLTE: body.CloudCoverLTE, Offset: body.Offset}
+	q := catalog.Query{CatalogID: body.CatalogID, ImageIDs: body.ImageIDs, Geometry: geometry, CloudCoverLT: body.CloudCoverLT, CloudCoverLTE: body.CloudCoverLTE}
+	if body.Offset != nil {
+		q.Offset = *body.Offset
+	}
 	if err := searchMetadata(&q, body.AcquiredFrom, body.AcquiredBefore, body.CloudCoverUnknown); err != nil {
 		Error(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if export && (body.Limit != nil || body.Offset != nil) {
+		Error(w, 400, "invalid_request", "export does not accept pagination")
 		return
 	}
 	if body.Limit != nil {
@@ -271,6 +288,11 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 			Error(w, 400, "invalid_request", "limit must be 1-500")
 			return
 		}
+	}
+	if export {
+		q.Limit, q.Offset = 0, 0
+		h.export(w, r, q)
+		return
 	}
 	h.execute(w, r, q)
 }

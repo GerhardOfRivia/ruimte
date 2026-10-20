@@ -50,3 +50,11 @@ The offline basemap ships inside the binary/container: roughly 300 KB of [Natura
 
 A server configured with `AARDE_WEB_BASEMAP=offline` or `none` forces that mode
 and disables the browser selector. See [offline deployments](configuration.md#offline-deployments).
+
+## Export imagery footprints
+
+After a successful search, click **Export GeoPackage** beside the search controls. Sign in with the web token if browsing anonymously. The browser downloads a `.gpkg` file containing all matches, regardless of the page being displayed. Pending filter edits are excluded until you successfully search again.
+
+Open the file in QGIS or another GeoPackage application. Its `image_footprints` layer contains the stored WGS84 MultiPolygons and `filename`, `cloud_cover`, and `file_location` fields. Unknown cloud percentages remain NULL. File locations are absolute paths on the server. Source imagery is never read or modified.
+
+The button shows progress and prevents duplicate downloads while generating. Empty searches report “No footprints to export.” If a resource limit is reached, narrow your search and retry; exports never silently omit records. See the [API export limits](api.md#geopackage-footprint-export).

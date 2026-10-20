@@ -74,3 +74,37 @@ Errors are structured, for example:
 ```
 
 Database/SQL details are logged server-side and not sent to clients. HTTP header/read/write/idle timeouts are configured; database statements time out after 15 seconds. SIGINT/SIGTERM stop new HTTP requests, drain active requests for up to 30 seconds, and close the database pool.
+
+## GeoPackage footprint export
+
+`POST /api/v1/imagery/export/gpkg` accepts the search JSON fields above, with
+optional `geometry` and without `limit` or `offset`. All matching catalog records
+are exported from a single database statement snapshot. A valid bearer token is
+always required, including with public browsing, because `file_location` exposes
+absolute server paths.
+
+Success is `200 application/geopackage+sqlite3`, with an attachment filename
+`aarde-footprints-YYYYMMDD-HHMMSS.gpkg` (UTC). The single `image_footprints` layer
+contains WGS84/EPSG:4326 MultiPolygons with holes and disjoint polygons preserved.
+Fields are `filename` (TEXT, stored display name), `cloud_cover` (nullable REAL,
+scene percentage), and `file_location` (TEXT, stored absolute asset location).
+Unknown cloud remains NULL even when every match is unknown. Multi-image NITFs
+remain one feature per catalog record. Export never opens source imagery.
+
+Limits per export are 10,000 records, 32 MiB intermediate GeoJSON, 128 MiB of
+SQLite pages, and 25 seconds for generation (database query: 15 seconds). Two
+exports may run concurrently per process. Limits reject the export rather than
+truncate it. Narrow the filters for larger results. Temporary files are deleted
+after delivery, failure, or cancellation. HTTP 404 means no matches, 413 means
+record/intermediate size exceeded, 503 means busy or missing `ogr2ogr`, and 500
+means generation failed (including SQLite size or time limits). Invalid filters
+return 400 and missing/invalid credentials return 401. Errors use the usual JSON
+envelope.
+
+```sh
+curl -X POST http://localhost:8080/api/v1/imagery/export/gpkg \
+  -H "Authorization: Bearer $AARDE_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"catalog_id":"default","cloud_cover_lte":20}' \
+  -o aarde-footprints.gpkg
+```

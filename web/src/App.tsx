@@ -11,7 +11,7 @@ import { ViewerLinks } from "./ViewerLinks";
 import { ViewerProgress } from "./ViewerProgress";
 import { GeoJSONInput } from "./GeoJSONInput";
 import type { MapHandle } from "./MapCanvas";
-import { APIError, request, search } from "./types";
+import { APIError, request, search, exportGeoPackage } from "./types";
 import type { Area, Basemap, Imagery, Page } from "./types";
 import { CatalogFilters } from "./CatalogFilters";
 import { CommercialNITF } from "./CommercialNITF";
@@ -65,6 +65,28 @@ function CatalogApp({ session }: { session: Session }) {
   const [loading, setLoading] = useState(false), [error, setError] = useState("");
   const [mode, setMode] = useState<"draw" | "edit" | "">("");
   const [searched, setSearched] = useState(false);
+  const exportingRequest = useRef<AbortController | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
+  useEffect(() => () => exportingRequest.current?.abort(), [token]);
+  async function downloadFootprints() {
+    if (exportingRequest.current) return;
+    if (!info.authenticated) { session.signIn(); return; }
+    const controller = new AbortController();
+    exportingRequest.current = controller;
+    setExporting(true);
+    setExportError("");
+    try { await exportGeoPackage(token, buildSearch(applied).criteria, controller.signal); }
+    catch (e) {
+      if (!controller.signal.aborted) {
+        if (e instanceof APIError && e.status === 401) unauthorized();
+        else setExportError(e instanceof Error ? e.message : "Could not export footprints.");
+      }
+    } finally {
+      exportingRequest.current = null;
+      if (!controller.signal.aborted) setExporting(false);
+    }
+  }
   const dirty = filterKey(draft) !== filterKey(applied);
   const hasArea = !!draft.geometry;
   const chips = appliedFilters(applied);
@@ -199,6 +221,15 @@ function CatalogApp({ session }: { session: Session }) {
       <CatalogFilters draft={draft} catalogs={catalogs} errors={fieldErrors} dirty={dirty}
         loading={loading} drawing={mode === "draw"} onChange={changeDraft}
         onSearch={() => void run(draft)} onClearArea={clearArea} />
+      <div className="filter-actions">
+        <Button variant="outlined" disabled={exporting || !searched || loading}
+          onClick={() => void downloadFootprints()}
+          startIcon={exporting ? <CircularProgress size={16} /> : undefined}>
+          {exporting ? "Exporting…" : "Export GeoPackage"}
+        </Button>
+      </div>
+      {exportError && <Alert severity="error" onClose={() => setExportError("")}>{exportError}</Alert>}
+
       {error && (
         <Alert severity="error" onClose={() => setError("")}>
           {error}

@@ -76,6 +76,7 @@ type Store interface {
 	ByChecksum(context.Context, string, string) (Imagery, error)
 	Insert(context.Context, Imagery) (Imagery, bool, error)
 	Search(context.Context, Query) (Page, error)
+	ExportFootprints(context.Context, Query, func(Footprint) error) error
 	Catalogs(context.Context) ([]string, error)
 	RemoveImage(context.Context, string, string) error
 	RemoveCatalog(context.Context, string) (int64, error)

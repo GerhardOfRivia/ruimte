@@ -130,3 +130,28 @@ export function search(
   criteria.ids?.forEach((id) => query.append("image_id", id));
   return request(`/api/v1/imagery?${query}`, token, { signal });
 }
+
+export async function exportGeoPackage(token: string, criteria: Search, signal: AbortSignal): Promise<void> {
+  const response = await fetch("/api/v1/imagery/export/gpkg", {
+    method: "POST", signal, cache: "no-store",
+    headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ catalog_id: criteria.catalog, image_ids: criteria.ids,
+      geometry: criteria.geometry, acquired_from: criteria.acquiredFrom,
+      acquired_before: criteria.acquiredBefore, cloud_cover_lt: criteria.cloudCoverLT,
+      cloud_cover_lte: criteria.cloudCoverLTE, cloud_cover_unknown: criteria.cloudCoverUnknown }),
+  });
+  if (!response.ok) {
+    let message = `Export failed (${response.status})`;
+    try { message = (await response.json()).error?.message ?? message; } catch { /* Proxy response. */ }
+    throw new APIError(response.status, message);
+  }
+  const blob = await response.blob();
+  if (signal.aborted) return;
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  const filename = response.headers.get("Content-Disposition")?.match(/filename="(aarde-footprints-\d{8}-\d{6}\.gpkg)"/);
+  link.download = filename?.[1] ?? "aarde-footprints.gpkg";
+  try { document.body.appendChild(link); link.click(); }
+  finally { link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
+}

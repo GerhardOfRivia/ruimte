@@ -1,5 +1,5 @@
 OUTPUT ?= bin
-SEMVER ?= 1.5.5
+SEMVER ?= 1.6.0
 VERSION ?= $(SEMVER)-dev
 RELEASE_TAG ?= v$(SEMVER)
 LDFLAGS = -ldflags "-X main.version=$(VERSION)"
@@ -13,8 +13,12 @@ all: build
 activate:
 	source activate
 
+audit:
+	# npm ci && npm audit
+	docker run --rm --user $$(id -u):$$(id -g) --mount type=bind,src=$(CURDIR),dst=/workspace -w /workspace/web node:22-bookworm-slim /bin/sh -lc 'npm ci && npm audit fix'
+
 web:
-	# npm ci && npm run build
+	# npm ci && npm audit && npm run build
 	docker run --rm --user $$(id -u):$$(id -g) --mount type=bind,src=$(CURDIR),dst=/workspace -w /workspace/web node:22-bookworm-slim /bin/sh -lc 'npm ci && npm run build'
 
 build:

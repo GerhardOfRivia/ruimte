@@ -222,6 +222,32 @@ func (r *Repository) Search(ctx context.Context, q catalog.Query) (catalog.Page,
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	page := catalog.Page{Items: []catalog.Imagery{}, Limit: q.Limit, Offset: q.Offset}
+	where, args := searchPredicate(q)
+	args = append(args, q.Limit+1, q.Offset)
+	query := "SELECT " + columns + " FROM imagery" + where + fmt.Sprintf(" ORDER BY imported_at DESC, id ASC LIMIT $%d OFFSET $%d", len(args)-1, len(args))
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return page, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		i, err := scan(rows)
+		if err != nil {
+			return page, err
+		}
+		page.Items = append(page.Items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return page, err
+	}
+	if len(page.Items) > q.Limit {
+		page.HasMore = true
+		page.Items = page.Items[:q.Limit]
+	}
+	return page, nil
+}
+
+func searchPredicate(q catalog.Query) (string, []any) {
 	args := []any{}
 	where := " WHERE true"
 	if q.CatalogID != "" {
@@ -260,26 +286,28 @@ func (r *Repository) Search(ctx context.Context, q catalog.Query) (catalog.Page,
 	} else if q.CloudCoverUnknown == "exclude" {
 		where += " AND cloud_cover IS NOT NULL"
 	}
-	args = append(args, q.Limit+1, q.Offset)
-	query := "SELECT " + columns + " FROM imagery" + where + fmt.Sprintf(" ORDER BY imported_at DESC, id ASC LIMIT $%d OFFSET $%d", len(args)-1, len(args))
-	rows, err := r.pool.Query(ctx, query, args...)
+	return where, args
+}
+
+// ExportFootprints streams a single statement snapshot without loading raster metadata.
+func (r *Repository) ExportFootprints(ctx context.Context, q catalog.Query, visit func(catalog.Footprint) error) error {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	where, args := searchPredicate(q)
+	args = append(args, catalog.MaxExportRecords+1)
+	rows, err := r.pool.Query(ctx, "SELECT display_name, cloud_cover, asset_location, ST_AsGeoJSON(footprint,17) FROM imagery"+where+fmt.Sprintf(" ORDER BY imported_at DESC, id ASC LIMIT $%d", len(args)), args...)
 	if err != nil {
-		return page, err
+		return err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		i, err := scan(rows)
-		if err != nil {
-			return page, err
+		var f catalog.Footprint
+		if err := rows.Scan(&f.Filename, &f.CloudCover, &f.FileLocation, &f.Geometry); err != nil {
+			return err
 		}
-		page.Items = append(page.Items, i)
+		if err := visit(f); err != nil {
+			return err
+		}
 	}
-	if err := rows.Err(); err != nil {
-		return page, err
-	}
-	if len(page.Items) > q.Limit {
-		page.HasMore = true
-		page.Items = page.Items[:q.Limit]
-	}
-	return page, nil
+	return rows.Err()
 }

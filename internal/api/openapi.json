@@ -1169,6 +1169,101 @@
         },
         "description": "Always authenticated. One complete segment image per raster response. Placement mesh maps original pixel edges into a common image-coordinate plane (x right, y up). Display downsampling never changes placement. Geometry coordinates use this same manifest coordinate system, not RFC7946 longitude/latitude. Opacity/pan/zoom do not request content. Cloud grids support NCDRD 2010 Byte values 0/255 with reserved values shown distinctly; CSSHPA v01 polygons are bounded and transformed. No RPC/DEM orthorectification."
       }
+    },
+    "/api/v1/imagery/export/gpkg": {
+      "post": {
+        "operationId": "exportGeoPackage",
+        "summary": "Export matching stored footprints as a GeoPackage",
+        "description": "Requires bearer authentication even during public browsing. Returns all matches without pagination. Limits: 10,000 records, 32 MiB intermediate data, 128 MiB SQLite pages, 25 seconds and two concurrent exports per process. No source imagery is read.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "GeoPackage with image_footprints MULTIPOLYGON layer in EPSG:4326. filename and file_location are TEXT; cloud_cover is nullable REAL.",
+            "content": {
+              "application/geopackage+sqlite3": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid filters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bearer token required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No footprints to export",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Export or request too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Export failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ogr2ogr unavailable or exports busy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2162,6 +2257,166 @@
         "required": [
           "type",
           "features"
+        ]
+      },
+      "ExportRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "catalog_id": {
+            "type": "string",
+            "description": "Omit or pass an empty string to search all catalogs. Otherwise use a valid catalog ID."
+          },
+          "geometry": {
+            "$ref": "#/components/schemas/Geometry"
+          },
+          "cloud_cover_lt": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Reported scene cloud cover strictly less than this finite percentage (0\u2013100). Zero matches no known values; 100 excludes fully cloudy scenes. Cannot be combined with cloud_cover_lte. Unknown values are excluded by default when a threshold is supplied; cloud_cover_unknown overrides this. All filters combine with AND before ordering and pagination. Omit or pass null for no threshold.",
+            "example": 20
+          },
+          "cloud_cover_lte": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Reported scene cloud cover at most this finite percentage (0\u2013100). Includes the exact boundary, including 0 and 100. Cannot be combined with cloud_cover_lt. Unknown values are excluded by default; use cloud_cover_unknown=include to retain them. Describes the whole scene, not clouds within the search area. Omit or pass null for the default."
+          },
+          "cloud_cover_unknown": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "exclude",
+              "include",
+              "only",
+              null
+            ],
+            "description": "Unknown cloud-cover policy. Defaults to exclude with either threshold and include otherwise. exclude without a threshold returns only known values; only returns unknown values and cannot be combined with either threshold. Omit or pass null for the default."
+          },
+          "acquired_from": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Inclusive acquisition timestamp (RFC3339). A date bound excludes imagery with unknown acquisition time. Must precede acquired_before when both are supplied. Omit or pass null for the default."
+          },
+          "acquired_before": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Exclusive acquisition timestamp (RFC3339). For an inclusive Through day, send midnight UTC of the following day. A date bound excludes imagery with unknown acquisition time. Omit or pass null for the default."
+          },
+          "image_ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "maxItems": 100,
+            "description": "Exact, case-sensitive image IDs, matching any listed ID and all other filters. IDs follow the same byte and character restrictions as GET image_id. Omit, use null, or an empty array for any ID."
+          }
+        },
+        "example": {
+          "geometry": {
+            "type": "Polygon",
+            "coordinates": [
+              [
+                [
+                  -106.2,
+                  39.3
+                ],
+                [
+                  -105.8,
+                  39.3
+                ],
+                [
+                  -105.8,
+                  39.7
+                ],
+                [
+                  -106.2,
+                  39.7
+                ],
+                [
+                  -106.2,
+                  39.3
+                ]
+              ]
+            ]
+          },
+          "cloud_cover_lte": 20,
+          "cloud_cover_unknown": "include",
+          "acquired_from": "2026-06-01T00:00:00Z",
+          "acquired_before": "2026-09-30T00:00:00Z"
+        },
+        "description": "Export filters; geometry is optional. Pagination is not accepted.",
+        "allOf": [
+          {
+            "not": {
+              "required": [
+                "cloud_cover_lt",
+                "cloud_cover_lte"
+              ],
+              "properties": {
+                "cloud_cover_lt": {
+                  "type": "number"
+                },
+                "cloud_cover_lte": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          {
+            "not": {
+              "required": [
+                "cloud_cover_unknown"
+              ],
+              "properties": {
+                "cloud_cover_unknown": {
+                  "const": "only"
+                }
+              },
+              "anyOf": [
+                {
+                  "required": [
+                    "cloud_cover_lt"
+                  ],
+                  "properties": {
+                    "cloud_cover_lt": {
+                      "type": "number"
+                    }
+                  }
+                },
+                {
+                  "required": [
+                    "cloud_cover_lte"
+                  ],
+                  "properties": {
+                    "cloud_cover_lte": {
+                      "type": "number"
+                    }
+                  }
+                }
+              ]
+            }
+          }
         ]
       }
     },
